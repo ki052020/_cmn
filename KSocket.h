@@ -11,6 +11,9 @@ class KIF_Info
 {
 public:
    KIF_Info(const char* if_name) : m_if_name{ if_name } {}
+   KIF_Info(const char* if_name, const ifaddrs* const p1st_ifaddrs);
+   virtual ~KIF_Info() noexcept {}
+
    void Set_NickName(const char* pname);
    void Set_MacAddr(uint64_t mac_addr);
 
@@ -63,15 +66,19 @@ protected:
 class KSocket : public KIF_Info
 {
 public:
-   // protocol = ETH_P_ALL | ETH_P_IP | ETH_P_IPV6
-   KSocket(const char* if_name, const ifaddrs* p1st_ifaddrs, int protocol, bool bPromisc);
-   ~KSocket();
+   // protocol = ETH_P_ALL / ETH_P_IP / ETH_P_IPV6
+   KSocket(const KIF_Info& if_info, int protocol, bool bPromisc);
+   KSocket(KIF_Info&& if_info, int protocol, bool bPromisc);	
+   virtual ~KSocket() noexcept;
 
    int fd() const { return m_fd; }
    int Read(void* pbuf, size_t bytes) const
       { return read(m_fd, pbuf, bytes); }
    
-private:
+protected:
    int m_fd = -1;
+	
+	// ----------------------
+	void Ctor_innrer(int protocol, bool bPromisc);
 };
 

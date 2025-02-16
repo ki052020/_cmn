@@ -11,6 +11,76 @@
 
 ///////////////////////////////////////////////////////////////////////
 // KIF_Info
+KIF_Info::KIF_Info(const char* if_name, const ifaddrs* const p1st_ifaddrs)
+	: m_if_name{ if_name }
+{
+	// p1st_ifaddrs を利用して ipv4, ipv6 アドレスを取得
+	std::vector<in6_addr> vec_addr_v6;
+	std::vector<std::string> vec_str_v6;
+
+	// INET_ADDRSTRLEN = 16, INET6_ADDRSTRLEN = 46
+	char str_addr[INET6_ADDRSTRLEN + 1];
+	for (const ifaddrs* ifa = p1st_ifaddrs; ifa != NULL; ifa = ifa->ifa_next)
+	{
+		if (ifa->ifa_addr == NULL)
+		{
+			// ifa が point to point などの if で、アドレスを持たない場合の処理
+			continue;
+		}
+		if (m_if_name.compare(ifa->ifa_name) != 0) { continue; }
+
+		const sa_family_t family = ifa->ifa_addr->sa_family;
+		if (family == AF_PACKET) { continue; }
+		
+		if (family == AF_INET)
+		{
+			if (m_bin_v4 != 0)
+				{ THROW("m_bin_v4 != 0"); }
+
+			const sockaddr_in* psockaddr_v4 = (const sockaddr_in*)ifa->ifa_addr;
+			m_bin_v4 = psockaddr_v4->sin_addr.s_addr;
+
+			if (inet_ntop(AF_INET, &psockaddr_v4->sin_addr, str_addr, INET6_ADDRSTRLEN + 1) == NULL)
+				{ THROW("inet_ntop() == NULL"); }
+			m_str_v4 = str_addr;
+			continue;
+		}
+		else if (family == AF_INET6)
+		{
+			const sockaddr_in6* psockaddr_v6 = (const sockaddr_in6*)ifa->ifa_addr ;
+			vec_addr_v6.push_back(psockaddr_v6->sin6_addr);
+
+			if (inet_ntop(AF_INET6, &psockaddr_v6->sin6_addr, str_addr, INET6_ADDRSTRLEN + 1) == NULL)
+				{ THROW("inet_ntop() == NULL"); }
+			vec_str_v6.push_back(str_addr);
+			continue;
+		}
+
+		THROW("detect -> family != AF_INET / AF_INET6");
+	}
+
+	// ----------------------------
+	m_pcs_v6_addr += vec_addr_v6.size();
+	if (m_pcs_v6_addr > 0)
+	{
+		m_vec_bin2_v6.reserve(m_pcs_v6_addr * 2 + 4);  // ローカルアドレス等の追加を想定して +4
+		m_vec_str_v6.reserve(m_pcs_v6_addr + 2);
+
+		for (const in6_addr& addr_v6 : vec_addr_v6)
+		{
+			const uint64_t* psrc = (const uint64_t*)&addr_v6;
+			m_vec_bin2_v6.push_back(*psrc);
+			m_vec_bin2_v6.push_back(*(psrc + 1));
+		}
+
+		for (const std::string& str_v6 : vec_str_v6)
+		{
+			m_vec_str_v6.push_back(str_v6);
+		}
+	}
+}
+
+// --------------------------------------------------------------------
 void KIF_Info::Set_NickName(const char* pname)
 {
 	if (m_nick_name.length() > 0)
@@ -141,81 +211,24 @@ void KIF_Info::DBG_ShowSelf(FILE* fd) const
 
 ///////////////////////////////////////////////////////////////////////
 // KSocket
-KSocket::KSocket(
-		const char* const if_name, const ifaddrs* const p1st_ifaddrs,
-		const int protocol, const bool bPromisc)
-	: KIF_Info{ if_name }
+KSocket::KSocket(const KIF_Info& if_info, int protocol, bool bPromisc)
+	: KIF_Info{ if_info }
+{
+	this->Ctor_innrer(protocol, bPromisc);
+}
+
+// --------------------------------------------------------------------
+KSocket::KSocket(KIF_Info&& if_info, int protocol, bool bPromisc)
+	: KIF_Info{ if_info }
+{
+	this->Ctor_innrer(protocol, bPromisc);
+}
+
+// --------------------------------------------------------------------
+void KSocket::Ctor_innrer(const int protocol, const bool bPromisc)
 {
 	if (protocol != ETH_P_ALL && protocol != ETH_P_IP && protocol != ETH_P_IPV6)
 		{ THROW("unknown -> protocol"); }
-
-   // ------------------------------------------------
-	// p1st_ifaddrs を利用して ipv4, ipv6 アドレスを取得
-	{
-		std::vector<in6_addr> vec_addr_v6;
-		std::vector<std::string> vec_str_v6;
-
-		// INET_ADDRSTRLEN = 16, INET6_ADDRSTRLEN = 46
-		char str_addr[INET6_ADDRSTRLEN + 1];
-		for (const ifaddrs* ifa = p1st_ifaddrs; ifa != NULL; ifa = ifa->ifa_next)
-		{
-			if (ifa->ifa_addr == NULL)
-			{
-				// ifa が point to point などの if で、アドレスを持たない場合の処理
-				continue;
-			}
-			if (m_if_name.compare(ifa->ifa_name) != 0) { continue; }
-
-			const sa_family_t family = ifa->ifa_addr->sa_family;
-			if (family == AF_PACKET) { continue; }
-			
-			if (family == AF_INET)
-			{
-				if (m_bin_v4 != 0)
-					{ THROW("m_bin_v4 != 0"); }
-
-				const sockaddr_in* psockaddr_v4 = (const sockaddr_in*)ifa->ifa_addr;
-				m_bin_v4 = psockaddr_v4->sin_addr.s_addr;
-
-				if (inet_ntop(AF_INET, &psockaddr_v4->sin_addr, str_addr, INET6_ADDRSTRLEN + 1) == NULL)
-					{ THROW("inet_ntop() == NULL"); }
-				m_str_v4 = str_addr;
-				continue;
-			}
-			else if (family == AF_INET6)
-			{
-				const sockaddr_in6* psockaddr_v6 = (const sockaddr_in6*)ifa->ifa_addr ;
-				vec_addr_v6.push_back(psockaddr_v6->sin6_addr);
-
-				if (inet_ntop(AF_INET6, &psockaddr_v6->sin6_addr, str_addr, INET6_ADDRSTRLEN + 1) == NULL)
-					{ THROW("inet_ntop() == NULL"); }
-				vec_str_v6.push_back(str_addr);
-				continue;
-			}
-
-			THROW("detect -> family != AF_INET / AF_INET6");
-		}
-
-		// ----------------------------
-		m_pcs_v6_addr += vec_addr_v6.size();
-		if (m_pcs_v6_addr > 0)
-		{
-			m_vec_bin2_v6.reserve(m_pcs_v6_addr * 2 + 4);  // ローカルアドレス等の追加を想定して +4
-			m_vec_str_v6.reserve(m_pcs_v6_addr + 2);
-
-			for (const in6_addr& addr_v6 : vec_addr_v6)
-			{
-				const uint64_t* psrc = (const uint64_t*)&addr_v6;
-				m_vec_bin2_v6.push_back(*psrc);
-				m_vec_bin2_v6.push_back(*(psrc + 1));
-			}
-
-			for (const std::string& str_v6 : vec_str_v6)
-			{
-				m_vec_str_v6.push_back(str_v6);
-			}
-		}
-	}
 
    // ------------------------------------------------
 	// m_fd の取得
@@ -226,7 +239,7 @@ KSocket::KSocket(
 
 	// ------------------------------------------------
 	// インターフェイス index を取得する
-	const u_int if_idx = if_nametoindex(if_name);
+	const u_int if_idx = if_nametoindex(m_if_name.c_str());
 	if (if_idx == 0)
 	{
       close(m_fd);
@@ -268,7 +281,7 @@ KSocket::KSocket(
 	// m_mac_addr の取得
 	{
 		ifreq ifr = {};
-		strncpy(ifr.ifr_name, if_name, IFNAMSIZ);
+		strncpy(ifr.ifr_name, m_if_name.c_str(), IFNAMSIZ);
 		if (ioctl(m_fd, SIOCGIFHWADDR, &ifr) < 0)
 		{
 			close(m_fd);
@@ -281,7 +294,7 @@ KSocket::KSocket(
 }
 
 // --------------------------------------------------------------------
-KSocket::~KSocket()
+KSocket::~KSocket() noexcept
 {
    if (m_fd >= 0) { close(m_fd); }
 }
