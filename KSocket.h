@@ -72,8 +72,14 @@ public:
    virtual ~KSocket() noexcept;
 
    int fd() const { return m_fd; }
-   int Read(void* pbuf, size_t bytes) const
-      { return read(m_fd, pbuf, bytes); }
+	int Read(void* pbuf, int bytes) const
+		{ return (int)read(m_fd, pbuf, (size_t)bytes); }
+	int Wrt(const void* const pbuf, const int bytes) const {
+		const int bytes_wtn = (int)write(m_fd, pbuf, (size_t)bytes);
+		if (bytes_wtn != bytes)
+			{ THROW("bytes_wtn != bytes"); }
+		return bytes_wtn;
+	}
    
 protected:
    int m_fd = -1;
